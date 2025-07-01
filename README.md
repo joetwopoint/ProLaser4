@@ -74,3 +74,4 @@ New Lens Texture
 * Lidar Gun Model & Textures by Scaarus: https://www.lcpdfr.com/downloads/gta5mods/misc/18506-prolaser-4-radar-gun/
 * Lidar Gun Weapon Wheel Textures by Medicmojo: https://www.lcpdfr.com/downloads/gta5mods/misc/38705-prolaser-4-lidar-hud-icon-and-text/
 * Google Maps Javascript by Flamm64: https://github.com/Flamm64/GTA-V-World-Map
+* Custom Weapon Slot and Optimizations by [cm8263](https://github.com/cm8263)
