@@ -12,7 +12,7 @@ var recordLimit = -1
 var version = -1
 var clockToneMute;
 var databaseRecords = [];
-var resourceName;
+var resourceName = (typeof GetParentResourceName === 'function') ? GetParentResourceName() : undefined;
 var velocityUnit = 'mph'
 var rangeUnit = 'ft'
 var speedFilters = []
@@ -70,6 +70,14 @@ $(document).keyup(function(event) {
 } );
  
 $(document).ready(function () {
+	// NUI init handshake (prevents LUA sending messages before JS is ready)
+	try {
+		if (resourceName) {
+			$.post("https://" + resourceName + "/NuiReady", JSON.stringify({}), function () {});
+		}
+	} catch (e) {
+		console.log("ProLaser4: NuiReady post failed", e);
+	}
 // Dynamically load script once doc is ready.
 	var googleMapsApiScript = document.createElement('script');
 	googleMapsApiScript.src = 'https://maps.googleapis.com/maps/api/js?key=AIzaSyDF6OI8FdmtZmgrTsh1yTa__UlwA52BGEQ&callback=initMap';
@@ -386,13 +394,18 @@ $(document).ready(function () {
 // ======= MAIN SCRIPT =======
 // This function is used to send data back through to the LUA side 
 function sendDataToLua( name, data ) {
-	$.post( "https://"+ resourceName +"/" + name, JSON.stringify( data ), function( datab ) {
+	// Fallback to GetParentResourceName() if config hasn't arrived yet
+	var rn = resourceName || ((typeof GetParentResourceName === 'function') ? GetParentResourceName() : undefined);
+	if (!rn) {
+		console.log('ProLaser4: resourceName not set for NUI callback ' + name);
+		return;
+	}
+	$.post( "https://"+ rn +"/" + name, JSON.stringify( data ), function( datab ) {
 		if ( datab != "ok" ) {
 			console.log( datab );
-		}            
+		}
 	} );
 }
-
 // Credit to xotikorukx playSound Fn.
 function playSound(file) {
     if (audioPlayer != null) {
