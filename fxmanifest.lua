@@ -1,18 +1,15 @@
 ------------------------------
 fx_version 'cerulean'
+
 games { 'gta5' }
 lua54 'on'
 
 author 'Trevor Barns'
 description 'Lidar Resource.'
 
-version '1.1.0'						-- Readonly version of currently installed version.
+version '1.1.1'						-- Readonly version of currently installed version.
 ------------------------------
 ui_page('UI/html/index.html')
-
-dependencies {
-    -- 'oxmysql',					-- uncomment for persistent records & record management tablet. See docs and configs.
-}
 
 files {
 	'speedlimits.json',
@@ -39,7 +36,6 @@ client_scripts {
 }
 
 server_scripts {
-    -- '@oxmysql/lib/MySQL.lua', -- uncomment for persistent records & record management tablet. See docs and configs.
 	'UTIL/sv_*.lua',
 	'UTIL/semver.lua'
 }

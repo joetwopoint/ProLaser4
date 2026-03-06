@@ -1,5 +1,43 @@
 local cfg = cfg
 
+-- Optional oxmysql support (used only if cfg.logging = true)
+local MySQL = {}
+
+function MySQL.ready()
+	return GetResourceState('oxmysql') == 'started' and exports and exports.oxmysql ~= nil
+end
+
+function MySQL.query(q, p, cb)
+	if not MySQL.ready() then
+		if cb then cb(nil) end
+		return
+	end
+	return exports.oxmysql:query(q, p or {}, cb)
+end
+
+function MySQL.insert(q, p, cb)
+	if not MySQL.ready() then
+		if cb then cb(nil) end
+		return
+	end
+	return exports.oxmysql:insert(q, p or {}, cb)
+end
+
+function MySQL.execute(q, p, cb)
+	if not MySQL.ready() then
+		if cb then cb(nil) end
+		return
+	end
+	local ok = pcall(function()
+		exports.oxmysql:execute(q, p or {}, cb)
+	end)
+	if not ok then
+		-- Fallback for older oxmysql export sets
+		return exports.oxmysql:query(q, p or {}, cb)
+	end
+end
+
+
 --	ShowLidar, repeater event to nearest player to show lidar to.
 RegisterServerEvent('prolaser4:SendDisplayData')
 AddEventHandler('prolaser4:SendDisplayData', function(target, data)
@@ -19,18 +57,18 @@ function DebugPrint(text)
 end
 
 --[[--------------- ADVANCED LOGGING --------------]]
-if cfg.logging and MySQL ~= nil then
+if cfg.logging then
 	local isInsertActive = false
 	LOGGED_EVENTS = { }
 	TEMP_LOGGED_EVENTS = { }
 	
 	---------------- QUERIES ----------------
-	local insertQuery = [[
+	local insertQueryPrefix = [[
 		INSERT INTO prolaser4 
 			(timestamp, speed, distance, targetX, targetY, player, street, selfTestTimestamp) 
 		VALUES 
-			(STR_TO_DATE(?, "%m/%d/%Y %H:%i:%s"), ?, ?, ?, ?, ?, ?, STR_TO_DATE(?, "%m/%d/%Y %H:%i:%s"))
 	]]
+	local insertRow = '(STR_TO_DATE(?, "%m/%d/%Y %H:%i:%s"), ?, ?, ?, ?, ?, ?, STR_TO_DATE(?, "%m/%d/%Y %H:%i:%s"))'
 	local selectQueryRaw = [[
 			SELECT 
 				rid,
@@ -55,7 +93,7 @@ if cfg.logging and MySQL ~= nil then
 		-- check if from server console
 		if source == 0 then
 			DebugPrint('^3[INFO]: Manually inserting records to SQL.^7')
-			InsertRecordsToSQL()
+			if MySQL.ready() then InsertRecordsToSQL() end
 		else
 			DebugPrint(string.format('^3[INFO]: Attempted to manually insert records but got source %s.^7', source))
 			TriggerClientEvent('chat:addMessage', source, { args = { '^1Error', 'This command can only be executed from the console.' } })
@@ -66,10 +104,14 @@ if cfg.logging and MySQL ~= nil then
 	-- Main thread, every restart remove old records if needed, insert records every X minutes as defined by cfg.loggingInsertInterval.
 	CreateThread(function()
 		local insertWait = cfg.loggingInsertInterval * 60000
+		while cfg.logging and not MySQL.ready() do
+			Wait(2000)
+		end
+		if not cfg.logging then return end
 		if cfg.loggingCleanUpInterval ~= -1 then
 			CleanUpRecordsFromSQL()
 		end
-		while true do
+		while cfg.logging do
 			InsertRecordsToSQL()
 			Wait(insertWait)
 		end
@@ -96,22 +138,44 @@ if cfg.logging and MySQL ~= nil then
 
 	--	Inserts records to SQL table
 	function InsertRecordsToSQL()
+		if not MySQL.ready() then return end
 		if not isInsertActive then
 			if #LOGGED_EVENTS > 0 then
 				DebugPrint(string.format('^3[INFO]: Started inserting %s records.^7', #LOGGED_EVENTS))
 				isInsertActive = true
-				-- Execute the insert statement for each entry
-				for _, entry in ipairs(LOGGED_EVENTS) do
-					MySQL.insert(insertQuery, {entry.time, entry.speed, entry.range, entry.targetX, entry.targetY, entry.player, entry.street, entry.selfTestTimestamp}, function(returnData) end)
-				end
-				-- Remove processed records
+
+				-- Snapshot current queue so new events can keep accumulating
+				local toInsert = LOGGED_EVENTS
 				LOGGED_EVENTS = {}
-				isInsertActive = false
-				-- Copy over temp entries to be processed next run
-				for _, entry in ipairs(TEMP_LOGGED_EVENTS) do
-				    table.insert(LOGGED_EVENTS, entry)
+
+				-- Batch insert to reduce DB load
+				local batchSize = 250
+				for i = 1, #toInsert, batchSize do
+					local placeholders = {}
+					local params = {}
+					local last = math.min(i + batchSize - 1, #toInsert)
+					for j = i, last do
+						local entry = toInsert[j]
+						placeholders[#placeholders+1] = insertRow
+						params[#params+1] = entry.time
+						params[#params+1] = entry.speed
+						params[#params+1] = entry.range
+						params[#params+1] = entry.targetX
+						params[#params+1] = entry.targetY
+						params[#params+1] = entry.player
+						params[#params+1] = entry.street
+						params[#params+1] = entry.selfTestTimestamp
+					end
+					local query = insertQueryPrefix .. table.concat(placeholders, ',')
+					MySQL.execute(query, params, function(_) end)
 				end
-				-- Remove copied over values.
+
+				isInsertActive = false
+
+				-- Move temp queue back in for next run
+				for _, entry in ipairs(TEMP_LOGGED_EVENTS) do
+					table.insert(LOGGED_EVENTS, entry)
+				end
 				TEMP_LOGGED_EVENTS = {}
 				DebugPrint('^3[INFO]: Finished inserting records.^7')
 			end
@@ -127,6 +191,10 @@ if cfg.logging and MySQL ~= nil then
 
 	-- Get all record data and return to client
 	function SelectRecordsFromSQL(source)
+		if not MySQL.ready() then
+			TriggerClientEvent('prolaser4:ReturnLogData', source, {})
+			return
+		end
 		DebugPrint(string.format('^3[INFO]: Getting records for %s.^7', GetPlayerName(source)))
 		MySQL.query(selectQuery, {}, function(result)
 			DebugPrint(string.format('^3[INFO]: Returned %s from select query.^7', #result))
@@ -139,6 +207,7 @@ if cfg.logging and MySQL ~= nil then
 	------------------ AUTO CLEANUP -----------------
 	--	Remove old records after X days old.
 	function CleanUpRecordsFromSQL()
+		if not MySQL.ready() then return end
 		DebugPrint('^3[INFO]: Removing old records.^7');
 		MySQL.query(cleanupQuery, {cfg.loggingCleanUpInterval}, function(returnData)
 			DebugPrint(string.format('^3[INFO]: Removed %s records (older than %s days)^7', returnData.affectedRows, cfg.loggingCleanUpInterval));
@@ -147,6 +216,9 @@ if cfg.logging and MySQL ~= nil then
 	
 	------------------ RECORD COUNT -----------------
 	function GetRecordCount()
+		if not MySQL.ready() then
+			return '^8NO CONNECTION^7'
+		end
 		local recordCount = '^8FAILED TO RETRIEVE        ^7'
 		MySQL.query(countQuery, {}, function(returnData)
 			if returnData and returnData[1] and returnData[1]['COUNT(*)'] then
@@ -172,7 +244,7 @@ CreateThread( function()
 	end)
 	
 	if cfg.logging then
-		if MySQL == nil then
+		if not MySQL.ready() then
 			print('^3[WARNING]: logging enabled, but oxmysql not found. Did you uncomment the oxmysql\n\t\t  lines in fxmanifest.lua?\n\n\t\t  Remember, changes to fxmanifest are only loaded after running `refresh`, then `restart`.^7')
 			recordCount = '^8NO CONNECTION^7'
 		else

@@ -189,6 +189,11 @@ end)
 CreateThread(function()
 	CreateThread(MainThread)
 	Wait(2000)
+	-- Wait for NUI to be ready (prevents early SendNUIMessage / JS init race)
+	local deadline = GetGameTimer() + 10000
+	while HUD.IsNuiReady and not HUD:IsNuiReady() and GetGameTimer() < deadline do
+		Wait(50)
+	end
 	-- Initalize lidar state and vars LUA->JS
 	HUD:SetSelfTestState(selfTestState, false)
 	HUD:SendBatteryPercentage()
@@ -219,7 +224,6 @@ end)
 -- REMOVE CONTROLS & HUD MESSAGE
 CreateThread( function()
 	while true do
-		Wait(1)
 		if holdingLidarGun then
 			HideHudComponentThisFrame(2)
 			if isAiming then
@@ -238,6 +242,9 @@ CreateThread( function()
 			DisableControlAction(0, cfg.previousHistory, true) 
 			DisableControlAction(0, cfg.nextHistory, true) 
 			DisableControlAction(0, 142, true) 					-- INPUT_MELEE_ATTACK_ALTERNATE
+			Wait(0)
+		else
+			Wait(500)
 		end
 	end
 end)
