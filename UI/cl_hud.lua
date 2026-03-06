@@ -1,4 +1,9 @@
 HUD = {}
+HUD._nuiReady = false
+
+function HUD:IsNuiReady()
+	return self._nuiReady == true
+end
 local cfg = cfg
 local targetPlayer = nil
 --------------------FUNCTIONS--------------------
@@ -154,6 +159,13 @@ function HUD:SendBatteryPercentage(percentage)
 	end
 	SendNUIMessage({ action = "SendBatteryAmount", bars = bars })
 end
+
+
+--[[Callback for JS -> LUA: NUI ready handshake]]
+RegisterNUICallback('NuiReady', function(data, cb)
+	HUD._nuiReady = true
+	if cb then cb('ok') end
+end)
 
 --[[Callback for JS -> LUA to close tablet on html button]]
 RegisterNUICallback('CloseTablet', function(cb)
